@@ -1,12 +1,16 @@
 #!/bin/bash
 # bad coding by V.Lukoshkin
 
-image='fenics-vimbook'                  # from which image to make a container
-port='127.0.0.1:8787'                   # host port (machine port) - it can be redifined (last 4 digits, I guess, would be enough)
-                                        # in the case of conflict with existing servers that share the same name
-                                        # [remote port (container port) is 8888 - also can be redefined, 2nd line after `docker run`]
-name='vimbook'                          # container name
-dir=/home/fenics                        # working directory - directory inside the container where commands will be executed
+# Some simple asserts
+[ -z $1 ] || [ -z $2 ] && echo "Two arguments must be passed. Exiting." &&  exit 1
+[ -n "$(\grep -oE '[^0-9]*' <<< $2)" ] && echo "Invalid port. Exiting." && exit 1
+
+image="$1"                # from which image to make a container.
+port="127.0.0.1:$2"       # host port (machine port)
+
+name="$(sed -E 's/([a-zA-Z0-9_.-]+):([a-zA-Z0-9_.-]*)/\1-\2/' <<< $1)"
+dir=/home/fenics          # working directory - directory inside the container
+                          # where commands will be executed
 
 warning="/ You are trying to run chrome as root. On the day this\n
         script was written, it was only possible to do by adding\n 
@@ -22,7 +26,7 @@ function ctrl_c() {
   exit 2
 }
 
-# if execute this script with sudo, print warning and exit
+# if one executes this script with sudo, then print warning and exit
 [ $EUID -eq 0 ] && echo -e $warning && ctrl_c;
 
 # --name to assign a name to the container
@@ -45,7 +49,7 @@ function ctrl_c() {
     -d -p $port:8888 \
     $image 'jupyter-notebook --ip=0.0.0.0' > /dev/null)
 
-sleep 3 # if it does not work for you increase the delay, here
+sleep 4 # if it does not work for you, increase the delay
 token=$(docker logs $name 2>&1 | grep -o "token=[a-z0-9]*" | sed -n 1p)
 google-chrome http://$port/?$token
 
@@ -54,4 +58,3 @@ trap ctrl_c SIGINT
 
 # -f, --follow    Follow log output
 docker logs --since 40s -f $name
-
