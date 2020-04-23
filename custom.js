@@ -5,6 +5,7 @@ require([
   // Map jj to <Esc>
   CodeMirror.Vim.map("jj", "<Esc>", "insert");
   CodeMirror.Vim.map("m", "o<Esc>", "normal");
+  CodeMirror.Vim.map("M", "O<Esc>", "normal");
 });
 
 // Configure Jupyter Keymap

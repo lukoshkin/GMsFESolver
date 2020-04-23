@@ -103,8 +103,9 @@ class MsFEM:
             # >> stiffness matrix
             S = build(kappa * np.tensordot(DU, DU, [1, 1]) * dx)
 
-            w, v = scipy.linalg.eigh(A, S)
-            self.psi_ms.append(np.dot(U, v[:, -self.M_off:]))
+            N = len(A)
+            w, v = scipy.linalg.eigh(A, S, eigvals=(N-self.M_off,N-1))
+            self.psi_ms.append(np.dot(U, v))
 
     def _overlap(self, a, b):
         if self._markers[a, b] is not None: return self._markers[a, b]
@@ -191,3 +192,41 @@ class MsFEM:
         bc = DirichletBC(self.W, Constant(0.), lambda x, on: on)
         solve(a==L, u, bc)
         return u
+
+# class ImprovedMsFEM(MsFEM):
+#         u = TrialFunction(V)
+#         v = TestFunction(V)
+#         b = assemble(Constant(0.)*v*dx)
+#         A = assemble(self._kappa[k]*dot(grad(u), grad(v))*dx)
+# 
+#         bmesh = BoundaryMesh(V.mesh(), 'local')
+#         for src in bmesh.coordinates():
+#             single = lambda x: setBC(x, src)
+#             bc1 = DirichletBC(V, Constant(0.), every)
+#             bc2 = DirichletBC(V, Constant(1.), single, 'pointwise')
+# 
+#             bcs = [bc1, bc2]
+#             _A = A.copy()
+#             _b = b.copy()
+#             for bc in bcs:
+#                 bc.apply(_A, _b)
+# 
+#             u = Function(V)
+#             solve(_A, u.vector(), _b)
+#             self._U[k].append(u)
+#             self._DU[k].append(grad(u))
+# 
+#     def buildOfflineSpace(self):
+#         build = np.vectorize(assemble, [float])
+#         self.psi_ms = []
+#         for V, (kappa, U, DU)  in zip(self.V, self._kappa, self._U, self._DU):
+#             dx = Measure('dx', domain=V)
+#             u = TrialFunction(V)
+#             v = TestFunction(V)
+#             A = assemble(kappa * U, U) * dx)
+#             # >> stiffness matrix
+#             S = build(kappa * np.tensordot(DU, DU, [1, 1]) * dx)
+# 
+#             N = len(A)
+#             w, v = scipy.linalg.eigh(A, S, eigvals=(N-self.M_off,N-1))
+#             self.psi_ms.append(np.dot(U, v))

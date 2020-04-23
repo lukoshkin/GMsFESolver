@@ -1,5 +1,10 @@
 FROM quay.io/fenicsproject/stable:latest
 
+# copy the necessary files if they are missing (to host system)
+RUN git checkout origin/develop custom.js .vimrc .ycm_extra_conf
+
+# install vim extension to jupyter notebook 
+# (using the same username under which the latter was installed)
 USER fenics
 
 RUN git clone https://github.com/lambdalisue/jupyter-vim-binding \
@@ -8,6 +13,7 @@ RUN git clone https://github.com/lambdalisue/jupyter-vim-binding \
 
 COPY custom.js /home/fenics/.jupyter/custom/
 
+# configure vim in the container
 USER root
 
 RUN apt-get update && apt-get -y install \
@@ -24,3 +30,19 @@ RUN git clone https://github.com/VundleVim/Vundle.vim.git \
 
 RUN git clone https://github.com/kien/ctrlp.vim.git \
     /root/.vim/bundle/ctrlp.vim
+
+# clean up
+RUN rm custom.js .vimrc .ycm_extra_conf
+
+USER fenics
+
+RUN pip install pip --upgrade && \
+    pip install jupyter_contrib_nbextensions && \
+    pip install jupyter_nbextensions_configurator && \
+    jupyter contrib nbextension install --user && \
+    jupyter nbextensions_configurator enable -- user
+
+COPY notebook.json /home/fenics/.jupyter/nbconfig/
+
+# clean up
+RUN rm notebook.json
