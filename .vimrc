@@ -139,3 +139,5 @@ let g:ctrlp_user_command = {
 
 
 let g:ycm_global_ycm_extra_conf = "~/.vim/.ycm_extra_conf.py"
+let g:ycm_confirm_extra_conf = 0
+" << Turns off the suggestion to use ycm_conf found in the workdir
