@@ -1,0 +1,10 @@
+# P1.ufl
+element = FiniteElement("Lagrange", triangle, 1)
+
+k = Coefficient(element)
+u = Coefficient(element)
+v = Coefficient(element)
+
+M = k*u*v*dx
+S = k*dot(grad(u), grad(v))*dx 
+forms = [M, S]
