@@ -8,3 +8,5 @@ v = Coefficient(element)
 M = k*u*v*dx
 S = k*dot(grad(u), grad(v))*dx 
 forms = [M, S]
+
+# compile with `ffc -l dolfin P1.ufl`

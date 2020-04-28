@@ -1,70 +1,76 @@
 #include <dolfin.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include "P1.h"
 
-#define N_EL 32
-
 using namespace dolfin;
-using array_2d = std::vector<std::vector<double>>;
+namespace py = pybind11;
 
 
-array_2d
-build_mass_matrix(array_2d& F, std::vector<double>& K) {
-    auto mesh = std::make_shared<UnitSquareMesh>(N_EL, N_EL);
-    auto V = std::make_shared<P1::Form_M_FunctionSpace_0>(mesh);
+py::array_t<double>
+build_mass_matrix(
+        std::shared_ptr<Function>& k,
+        std::vector<std::shared_ptr<Function>>& F) {
 
-    auto u = std::make_shared<Function>(V);
-    auto v = std::make_shared<Function>(V);
-    auto k = std::make_shared<Function>(V);
-    k->vector()->set_local(K);
+    auto V = k->function_space();
+    size_t N_EL(F.size());
 
-    P1::Form_M mass_form(mesh, k, u, v);
-    array_2d mass(4*N_EL, std::vector<double>(4*N_EL));
+    P1::Form_M mass_form(V->mesh());
+    mass_form.set_coefficient(0, k);
 
-    for (int i=0; i<4*N_EL; ++i) {
-        u->vector()->set_local(F[i]);
-        for (int j=i; j<4*N_EL; ++j) {
-            v->vector()->set_local(F[j]);
-            mass[i][j] = assemble(mass_form);
+    py::array_t<double> mass({N_EL, N_EL});
+    auto M_info = mass.request();
+    double * M_ptr = (double *)M_info.ptr;
+
+    for (uint i=0; i<N_EL; ++i) {
+        mass_form.set_coefficient(1, F[i]);
+        for (uint j=i; j<N_EL; ++j) {
+            mass_form.set_coefficient(2, F[j]);
+            M_ptr[i*N_EL+j] = assemble(mass_form);
         }
     }
     return mass;
 }
 
 
-array_2d
-build_stiffness_matrix(array_2d& F, std::vector<double>& K) {
-    auto mesh = std::make_shared<UnitSquareMesh>(N_EL, N_EL);
-    auto V = std::make_shared<P1::Form_S_FunctionSpace_0>(mesh);
+py::array_t<double>
+build_stiffness_matrix(
+        std::shared_ptr<Function>& k,
+        std::vector<std::shared_ptr<Function>>& F) {
 
-    auto u = std::make_shared<Function>(V);
-    auto v = std::make_shared<Function>(V);
-    auto k = std::make_shared<Function>(V);
-    k->vector()->set_local(K);
+    auto V = k->function_space();
+    size_t N_EL(F.size());
 
-    P1::Form_S stiffness_form(mesh, k, u, v);
-    array_2d stiffness(4*N_EL, std::vector<double>(4*N_EL));
+    P1::Form_S stiffness_form(V->mesh());
+    stiffness_form.set_coefficient(0, k);
 
-    for (int i=0; i<4*N_EL; ++i) {
-        u->vector()->set_local(F[i]);
-        for (int j=i; j<4*N_EL; ++j) {
-            v->vector()->set_local(F[j]);
-            stiffness[i][j] = assemble(stiffness_form);
+    py::array_t<double> stiffness({N_EL, N_EL});
+    auto S_info = stiffness.request();
+    double * S_ptr = (double *)S_info.ptr;
+
+    for (uint i=0; i<N_EL; ++i) {
+        stiffness_form.set_coefficient(1, F[i]);
+        for (uint j=i; j<N_EL; ++j) {
+            stiffness_form.set_coefficient(2, F[j]);
+            S_ptr[i*N_EL+j] = assemble(stiffness_form);
         }
     }
     return stiffness;
 }
 
+
 PYBIND11_MODULE(SIGNATURE, m) {
-    m.doc() = "A faster construction of mass and stiffness forms with C++";
+    m.doc() = "Faster calculations with C++";
     m.def(
             "build_mass_matrix",
             &build_mass_matrix, 
-            "<K\\grad(u_i), \\grad(u_j)>");
+            "Computes mass matrix <kappa Psi_i, Psi_j>",
+            py::arg("kappa"), py::arg("Psi"));
 
     m.def(
             "build_stiffness_matrix",
             &build_stiffness_matrix,
-            "<K u_i, u_j>");
+            "Computes stiffness matrix <kappa grad(Psi_i), grad(Psi_j)>",
+            py::arg("kappa"), py::arg("Psi"));
 }
