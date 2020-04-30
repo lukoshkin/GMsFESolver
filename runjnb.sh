@@ -91,11 +91,12 @@ docker exec --user="fenics" -d $name jupyter notebook --ip=0.0.0.0
 run_notebook () {
   token=$(docker exec --user="fenics" $name jupyter notebook list |
     tail -1 | \grep -o "token=[a-z0-9]*")
+  port=$(docker port $name | cut -d ' ' -f3)
   \google-chrome http://$port/?$token
 }
 
 run_bash () {
-  docker exec -ti $name bash -c 'su -- fenics'
+  docker exec -ti $name su - fenics
 }
 
 function ctrl_c() {

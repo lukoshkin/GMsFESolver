@@ -1,4 +1,4 @@
-FROM quay.io/fenicsproject/stable:latest
+FROM quay.io/fenicsproject/stable:2019.1.0.r3
 
 # uninstall jupyter since it was installed
 # in root install directory in the base image
@@ -26,16 +26,18 @@ COPY --chown=$USER .ycm_extra_conf.py /home/fenics/.vim/
 RUN git clone https://github.com/VundleVim/Vundle.vim.git \
     $HOME/.vim/bundle/Vundle.vim && \
     vim +PluginInstall +qall && \
-    python3 $HOME/.vim/bundle/YouCompleteMe/install.py --clang-completer
-
-RUN git clone https://github.com/kien/ctrlp.vim.git \
+    python3 $HOME/.vim/bundle/YouCompleteMe/install.py --clang-completer && \
+    git clone https://github.com/kien/ctrlp.vim.git \
     $HOME/.vim/bundle/ctrlp.vim
 
 # install jupyter in HOME dir, update PATH, install jupyter nbextensions
 ENV PATH="/home/fenics/.local/bin:${PATH}"
-RUN pip install --user jupyter \
-                       jupyter_contrib_nbextensions \
-                       jupyter_nbextensions_configurator
+RUN pip install --user pip --upgrade \
+                        jupyter \
+                        jupyter_contrib_nbextensions \
+                        jupyter_nbextensions_configurator
+
+# FIXME: create requirements.txt and add `pip install -r requirements.txt`
 
 RUN git clone https://github.com/lambdalisue/jupyter-vim-binding \
     $HOME/.local/share/jupyter/nbextensions/vim_binding && \
@@ -45,5 +47,7 @@ RUN git clone https://github.com/lambdalisue/jupyter-vim-binding \
 COPY --chown=$USER custom.js /home/fenics/.jupyter/custom/
 COPY --chown=$USER notebook.json /home/fenics/.jupyter/nbconfig/
 
+# remove duplicated PATH update
+RUN sed -i '23,27d' $HOME/.profile
 # Since CMD /sbin/my_init of the base image requires root privileges, change user
 USER root
