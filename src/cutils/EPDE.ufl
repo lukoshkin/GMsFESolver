@@ -1,0 +1,14 @@
+# EPDE.ufl
+# Elliptic Partial Differential Equation
+# --------------------------------------
+# compile with `ffc -l dolfin EPDE.ufl`
+
+element = FiniteElement("Lagrange", triangle, 1)
+
+k = Coefficient(element)
+f = Coefficient(element)
+u = TrialFunction(element)
+v = TestFunction(element)
+
+L = f*v*dx
+a = k*dot(grad(u), grad(v))*dx

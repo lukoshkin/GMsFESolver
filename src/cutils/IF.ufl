@@ -1,0 +1,14 @@
+# IF.ufl
+# Integral Forms
+# --------------
+# compile with `ffc -l dolfin IF.ufl`
+
+element = FiniteElement("Lagrange", triangle, 1)
+
+k = Coefficient(element)
+f1 = Coefficient(element)
+f2 = Coefficient(element)
+
+M = k*f1*f2*dx
+S = k*dot(grad(f1), grad(f2))*dx 
+forms = [M, S]

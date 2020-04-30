@@ -1,0 +1,12 @@
+# GEP.ufl
+# Generalized Eigenvalue Problem
+# ------------------------------
+# compile with `ffc -l dolfin GEP.ufl`
+
+element = FiniteElement("Lagrange", triangle, 1)
+
+k = Coefficient(element)
+u = TrialFunction(element)
+v = TestFunction(element)
+
+a = k*u*v*dx
