@@ -1,5 +1,21 @@
 #!/bin/bash
-# bad coding by V.Lukoshkin
+##################################
+# Author  : V.Lukoshkin
+# Email   : lukoshkin@phystech.edu
+##################################
+
+print_warning () {
+  echo -e "\nWARNING"
+  printf "\n%2s You are trying to run chrome as root. On the day this\n" ''
+  printf "%2s script was written, it was only possible to do by adding\n" ''
+  printf "%2s '--no-sandbox' option to chrome's call in this script.\n" ''
+  printf "%2s For your safety, it is highly discouraged to run chrome\n" ''
+  printf "%2s without sandboxing, unless you know what you are doing\n" ''
+  exit
+}
+
+# if one executes this script with sudo, then print warning and exit
+[ $EUID -eq 0 ] && print_warning
 
 port='8237' # default port
 print_flag=true
@@ -54,19 +70,6 @@ $print_flag && ! [ "$exists" ] \
   && echo "Port option does not affect an existing container"
 port="127.0.0.1:$port"
 
-print_warning () {
-  echo -e "\nWARNING"
-  printf "\n%2s You are trying to run chrome as root. On the day this\n" ''
-  printf "%2s script was written, it was only possible to do by adding\n" ''
-  printf "%2s '--no-sandbox' option to chrome's call in this script.\n" ''
-  printf "%2s For your safety, it is highly discouraged to run chrome\n" ''
-  printf "%2s without sandboxing, unless you know what you are doing\n" ''
-  exit
-}
-
-# if one executes this script with sudo, then print warning and exit
-[ $EUID -eq 0 ] && print_warning
-
 # The comments below describe optins of `docker run` which follows them
 # ---------------------------------------------------------------------
 # --name to assign a name to the container
@@ -85,6 +88,9 @@ dir=/home/fenics
     -w $dir -v $PWD:$dir/shared \
     -d -p $port:8888 \
     $image 'tail -f /dev/null' > /dev/null)
+
+# NOTE: Due to the workaround I use, `-w` option has no effect on
+# login options of the user 'fenics'
 # ---------------------------------------------------------------------
 docker exec --user="fenics" -d $name jupyter notebook --ip=0.0.0.0
 
