@@ -1,6 +1,7 @@
 # GEP.ufl
 # Generalized Eigenvalue Problem
-# ------------------------------
+# The second matrix is defined as form in EPDE.ufl
+# ------------------------------------------------
 # compile with `ffc -l dolfin GEP.ufl`
 
 element = FiniteElement("Lagrange", triangle, 1)

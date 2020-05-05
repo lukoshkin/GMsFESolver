@@ -1,0 +1,13 @@
+# MIF.ufl
+# Modern Integral Form
+# --------------
+# compile with `ffc -l dolfin MIF.ufl`
+
+element = FiniteElement("Lagrange", triangle, 1)
+
+k = Coefficient(element)
+f1 = Coefficient(element)
+f2 = Coefficient(element)
+
+S = k*dot(grad(f1), grad(f2))*dx(1)
+forms = [S]

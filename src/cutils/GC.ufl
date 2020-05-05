@@ -1,0 +1,17 @@
+# GC.ufl
+# Global Coupling
+# --------------------------------------
+# compile with `ffc -l dolfin GC.ufl`
+
+element = FiniteElement("Lagrange", triangle, 1)
+
+k = Coefficient(element)
+xi_1 = Coefficient(element)
+xi_2 = Coefficient(element)
+f = Coefficient(element)
+
+u = TrialFunction(element)
+v = TestFunction(element)
+
+L = f*xi_1*v*dx
+a = k*dot(grad(xi_1*u), grad(xi_2*v))*dx
