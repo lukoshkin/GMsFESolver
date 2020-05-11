@@ -8,6 +8,8 @@ element = FiniteElement("Lagrange", triangle, 1)
 k = Coefficient(element)
 f1 = Coefficient(element)
 f2 = Coefficient(element)
+rhs = Coefficient(element)
 
 S = k*dot(grad(f1), grad(f2))*dx(1)
-forms = [S]
+F = rhs*f1*dx(1)
+forms = [S, F]

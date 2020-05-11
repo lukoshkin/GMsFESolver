@@ -1,98 +1,91 @@
 import numpy as np
 
+from functools import partial
 from mpi4py import MPI
-from mpi_gmsfem import *
+
+from core_components import *
 from optimal_distribution import ColoredPartition
-from utils import get_simple_kappa
                 
-scomm = MPI.COMM_SELF
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
 
-n_el = 8
-n_blocks = 3
-N_el = n_el * n_blocks
-N_c = (n_blocks-1)*(n_blocks-1)
-M_off = 10
-M_on = 10
+class GMsFESolver:
+    def __init__(
+            self, K_mu, mu=None, n_el=16, n_blocks=4, M_off=16, M_on=8):
+        """
+        Parameters:
+            K_mu : list[Function] / Expression
+                hyperparameter-dependent permeability coefficient
 
-args = (n_el, n_blocks, scomm)
+            n_el : int
+                number of cells in a coarse block along 1D 
 
-eta = [10, 1e2, 1e3, 4e3]
-K = get_simple_kappa(eta, N_el, comm=scomm, seed=123)
-N_v = len(eta)
+            n_blocks : int
+                number of coarse blocks along 1D
 
-calc_weigths = lambda k: k.vector().get_local().sum()
-weights = np.vectorize(calc_weigths, 'O')(K)
-avg_K = np.sum(K/weights)
+            M_off : int
+                dimensionality of the offline space
 
-def get_dofs(fns):
-    out = []
-    for fn in fns:
-        dofs = fn.compute_vertex_values()
-        out.append(dofs)
-    return np.array(out)
+            M_on : int
+                dimensionality of the online space
+        """
+        if mu is None:
+            n_colors = len(K_mu)
+            pass
+        else:
+            n_colors = len(mu)
+            fine_mesh = UnitSquareMesh(n_el, n_el)
+            W = FunctionSpace(mesh, 'P', 1)
+            pass
 
-def restore_fns(vdofs, V):
-    out = []
-    v2d = vertex_to_dof_map(V)
-    for dofs in vdofs:
-        fn = Function(V)
-        fn.vector()[v2d] = dofs
-        out.append(fn)
-    return np.array(out)
+        self.gcomm = MPI.COMM_WORLD
+        self._rank = self.comm.Get_rank()
+        self._size = self.comm.Get_size()
 
+        self.cp = ColoredPartition(self._size, n_colors)
+        n_comms,_ = self.cp.partition((n_blocks-1)*(n_blocks-1))
 
-print("---- BUILDING SNAPSHOT SPACE ----")
-nodebuf, sendbuf = [], []
-cp = ColoredPartition(size, N_v)
-n_comms,_ = cp.partition(N_c)
+        ggroup = self.gcomm.Get_group()
+        active = self.gcomm.Create_group(
+                ggroup.Incl(np.arange(n_comms*n_colors)))
+        self.lcomm = MPI.Comm.Split(
+                active, self._rank//n_colors, self._rank)
 
-world_group = comm.Get_group()
-subcomm = comm.Create_group(world_group.Incl(np.arange(n_comms)))
-kcomm = MPI.Comm.Split(subcomm, rank//N_v, rank)
-if kcomm != MPI.COMM_NULL: krank = kcomm.Get_rank()
+        rmap = self.cp.map['r'][self._rank]
+        cmap = self.cp.map['c'][self._rank]
+        self.K, self.avg_K = project_kappa(K_mu, cmap, rmap)
 
-ms_solver = {}
-for r in cp.map['r'][rank]:
-    if r is not None and r not in ms_solver.keys():
-        ms_solver[r] = SpaceBlocks(r, *args)
+        self._cpty = np.unique(rmap[~np.isnan(rmap)])
+        self.vdim = (2*n_el+1)*(2*n_el+1)
+        self.snap_dim = 8*n_el
 
-for c, r, f in cp.getZip(rank):
-    psi_snap_k = ms_solver[r].buildSnapshotSpace(K[c])
-    if f: sendbuf.append(get_dofs(psi_snap_k))
-    else: nodebuf.append(psi_snap_k)
+        with open('cutils/pymodule2.cpp', 'r') as fp:
+            cutils = compile_cpp_code(fp.read(), include_dirs=['cutils'])
 
-recvbuf = None
-if kcomm != MPI.COMM_NULL and kcomm.Get_rank() == 0:
-    pack_size = cp.countMSGTransfers()[rank//N_v]
-    recvbuf = np.empty([pack_size, n_el*n_el, ms_solver.V.dim()])
+        pairs = overlap_map(n_blocks-1)
+        imask = (pairs[:, 0] == reg_id)
+        omask = (pairs[:, 1] == reg_id)
+        self.st = pairs[omask][:, 0]
+        self.rf = pairs[imask][:, 1]
 
-if kcomm != MPI.COMM_NULL:
-    kcomm.Gather(np.array(sendbuf), recvbuf, root=0)
+        self.cores = {}
+        for r in rank_map:
+            if r is not None and r not in cores.keys():
+                self.cores[r] = GMsFEUnit(reg_id, n_el, n_blocks, cutils)
 
-print("==== BUILDING OFFLINE SPACE ====")
-for r in range(rank, N_c*N_v, size):
-    if r not in major_ranks: continue
-    recvbuf = recvbuf.reshape(N_v*n_el*n_el, -1)
-    psi_snap = restore_fns(recvbuf, ms_solver.V)
-    psi_off,_ = ms_solver.buildOfflineSpace(avg_K, psi_snap)
+    def buildOnlineSpace(self):
+        nodebuf, sendbuf = [], []
+        for c, r, f in self.cp.getZip(self._rank):
+            Nv_snap = self.cores[r].snapshotSpace(self.K[c,r])
+            if f: sendbuf.append(Nv_snap)
+            else: nodebuf.append(Nv_snap)
 
-data = get_dofs(psi_off)
-kcomm.Bcast(data, root=0)
-psi_off = restore_fns(psi_off, ms_solver.V)
+        recvbuf = None
+        if (self.lcomm != MPI.COMM_NULL
+                and self.lcomm.Get_rank() == 0):
+            pack_size = cp.countMSGTransfers()[self._rank//self.cp.dimC]
+            recvbuf = np.empty([pack_size, self.snap_dim, self.vdim])
 
-print("#### BUILDING ONLINE SPACE ####")
-for _ in range(rank, N_c*N_v, size):
-    psi_ms,_ = ms_solver.buildOnlineSpace(psi_off)
-
-recvbuf, received = None, None
-if rank == 0:
-    recvbuf = np.empty([size, M_on, ms_solver.V.dim()])
-
-sendbuf = get_dofs(psi_ms)
-comm.Allgather(sendbuf, recvbuf)
-psi_ms = restore_fns(recvbuf)
-
-
+        if kcomm != MPI.COMM_NULL:
+            self.lcomm.Gather(np.array(sendbuf), recvbuf, root=0)
+            Nv = np.concatenate(nodebuf, recvbuf) 
+            Nv = Nv.reshape(-1, self.cp.dimC, *Nv.shape[1:])
+            return Nv

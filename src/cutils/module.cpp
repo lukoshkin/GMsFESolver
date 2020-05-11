@@ -1,6 +1,6 @@
 #include <dolfin.h>
 #include <iostream>
-#include "P1.h"
+#include "IF.h"
 
 #define N_EL 2
 #define DIM (N_EL+1)*(N_EL+1)
@@ -12,14 +12,14 @@ using array_2d = std::vector<std::vector<double>>;
 array_2d
 build_mass_matrix(array_2d& F, std::vector<double>& K) {
     auto mesh = std::make_shared<UnitSquareMesh>(N_EL, N_EL);
-    auto V = std::make_shared<P1::Form_M_FunctionSpace_0>(mesh);
+    auto V = std::make_shared<IF::Form_M_FunctionSpace_0>(mesh);
 
     auto u = std::make_shared<Function>(V);
     auto v = std::make_shared<Function>(V);
     auto k = std::make_shared<Function>(V);
     k->vector()->set_local(K);
 
-    P1::Form_M mass_form(mesh, k, u, v);
+    IF::Form_M mass_form(mesh, k, u, v);
     array_2d mass(4*N_EL, std::vector<double>(4*N_EL));
 
     for (int i=0; i<4*N_EL; ++i) {
@@ -36,14 +36,14 @@ build_mass_matrix(array_2d& F, std::vector<double>& K) {
 array_2d
 build_stiffness_matrix(array_2d& F, std::vector<double>& K) {
     auto mesh = std::make_shared<UnitSquareMesh>(N_EL, N_EL);
-    auto V = std::make_shared<P1::Form_S_FunctionSpace_0>(mesh);
+    auto V = std::make_shared<IF::Form_S_FunctionSpace_0>(mesh);
 
     auto u = std::make_shared<Function>(V);
     auto v = std::make_shared<Function>(V);
     auto k = std::make_shared<Function>(V);
     k->vector()->set_local(K);
 
-    P1::Form_S stiffness_form(mesh, k, u, v);
+    IF::Form_S stiffness_form(mesh, k, u, v);
     array_2d stiffness(4*N_EL, std::vector<double>(4*N_EL));
 
     for (int i=0; i<4*N_EL; ++i) {
@@ -69,6 +69,7 @@ void print_matrix(array_2d mat) {
 
 int main () {
     // Simple tests
+    auto a = std::make_shared<Vector>(MPI_COMM_SELF);
     std::vector<double> K(DIM, 1);
     array_2d F(4*N_EL, K);
     std::cout << "vector K\n";

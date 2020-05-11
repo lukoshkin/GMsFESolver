@@ -2,6 +2,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include "Projection.h"
 #include "EPDE.h"
 #include "GEP.h"
 #include "GC.h"
@@ -111,20 +112,74 @@ offdiagonal_coupling(
     return A;
 }
 
+
 std::vector<std::vector<double>>
-project_embed(
-        py::array_t<double>& Nv,
+multiply_project(
         std::shared_ptr<Function>& xi,
+        py::array_t<double>& Nv) {
+    auto V = xi->function_space();
+    Projection::BilinearForm a(V, V);
+    Projection::LinearForm L(V);
+    L.xi = xi;
+
+    auto Nv_info = Nv.request();
+    double * Nv_ptr = (double *)Nv_info.ptr;
+    size_t N_EL(Nv_info.shape[0]), DIM(V->dim());
+
+    Matrix A; Vector b;
+    assemble(A, a);
+
+    auto f = std::make_shared<Function>(V);
+    auto u = std::make_shared<Function>(V);
+    std::vector<std::vector<double>> Nv_ms(
+            N_EL, std::vector<double>(DIM));
+
+    for (uint i=0; i<N_EL; ++i) {
+        f->vector()->set_local(
+                std::vector<double>(
+                    Nv_ptr+i*DIM, Nv_ptr+i*DIM+DIM));
+        L.f = f;
+        assemble(b, L);
+        solve(A, *u->vector(), b);
+        u->vector()->get_local(Nv_ms[i]);
+    }
+   return Nv_ms;
+}
+
+
+std::vector<std::vector<double>>
+zero_extrapolation(
+        std::vector<std::vector<double>>& Nv,
+        std::shared_ptr<FunctionSpace>& V,
         std::shared_ptr<FunctionSpace>& W) {
 
-    auto V = xi->function_space();
+    size_t N_EL(Nv.size());
+    auto v = std::make_shared<Function>(V);
+    auto e = std::make_shared<Function>(W);
+    std::vector<std::vector<double>> ms_dofs(
+            N_EL, std::vector<double>(W->dim()));
+
+    for (uint i=0; i<N_EL; ++i) {
+        v->vector()->set_local(Nv[i]);
+        LagrangeInterpolator::interpolate(*e, *v);
+        e->vector()->get_local(ms_dofs[i]);
+    }
+    return ms_dofs;
+}
+
+
+std::vector<std::vector<double>>
+zero_extrapolation(
+        py::array_t<double>& Nv, 
+        std::shared_ptr<FunctionSpace>& V,
+        std::shared_ptr<FunctionSpace>& W) {
+
     auto v = std::make_shared<Function>(V);
     auto e = std::make_shared<Function>(W);
 
     auto Nv_info = Nv.request();
     double * Nv_ptr = (double *)Nv_info.ptr;
     size_t N_EL(Nv_info.shape[0]), DIM(V->dim());
-
     std::vector<std::vector<double>> ms_dofs(
             N_EL, std::vector<double>(W->dim()));
 
@@ -132,8 +187,6 @@ project_embed(
         v->vector()->set_local(
                 std::vector<double>(
                     Nv_ptr+i*DIM, Nv_ptr+i*DIM+DIM));
-
-        *v->vector() *= *xi->vector();
         LagrangeInterpolator::interpolate(*e, *v);
         e->vector()->get_local(ms_dofs[i]);
     }
@@ -164,7 +217,7 @@ stiffness_integral_matrix(
     for (uint i=0; i<N_EL; ++i) {
         u->vector()->set_local(Psi1[i]);
         stiffness_form.set_coefficient(1, u);
-        for (uint j=i; j<N_EL; ++j) {
+        for (uint j=0; j<N_EL; ++j) {
             v->vector()->set_local(Psi2[j]);
             stiffness_form.set_coefficient(2, v);
             S_ptr[i*N_EL+j] = assemble(stiffness_form);
@@ -172,6 +225,50 @@ stiffness_integral_matrix(
     }
     return stiffness;
 }
+
+
+std::pair<py::array_t<double>, py::array_t<double>>
+integral_assembling(
+        std::shared_ptr<Function>& k,
+        std::vector<std::vector<double>>& Nv,
+        std::shared_ptr<Function>& rhs, 
+        std::shared_ptr<MeshFunction<size_t>>& markers) {
+
+    auto W = k->function_space();
+    auto u = std::make_shared<Function>(W);
+    auto v = std::make_shared<Function>(W);
+    size_t N_EL(Nv.size());
+
+    MIF::Form_S stiffness_form(W->mesh());
+    stiffness_form.set_coefficient(0, k);
+    stiffness_form.dx = markers;
+
+    MIF::Form_F src_term(W->mesh());
+    src_term.set_coefficient(0, rhs);
+    src_term.dx = markers;
+
+    py::array_t<double> A({N_EL, N_EL});
+    auto A_info = A.request();
+    double * A_ptr = (double *)A_info.ptr;
+
+    py::array_t<double> b(N_EL);
+    auto b_info = b.request();
+    double * b_ptr = (double *)b_info.ptr;
+
+    for (uint i=0; i<N_EL; ++i) {
+        u->vector()->set_local(Nv[i]);
+        stiffness_form.set_coefficient(1, u);
+        src_term.set_coefficient(1, u);
+        b_ptr[i] = assemble(src_term);
+        for (uint j=i; j<N_EL; ++j) {
+            v->vector()->set_local(Nv[j]);
+            stiffness_form.set_coefficient(2, v);
+            A_ptr[i*N_EL+j] = assemble(stiffness_form);
+        }
+    }
+    return std::make_pair(A, b);
+}
+
 
 PYBIND11_MODULE(SIGNATURE, m) {
     m.doc() = "Faster calculations with C++";
@@ -211,10 +308,43 @@ PYBIND11_MODULE(SIGNATURE, m) {
             py::arg("kappa"), py::arg("xi_1"), py::arg("xi_2"));
 
     m.def(
-            "project_embed",
-            &project_embed,
+            "multiply_project",
+            &multiply_project,
+            "Multiply by xi and project to xi->function_space()",
+            py::arg("xi"), py::arg("NodalValues"));
+
+    m.def(
+            "zero_extrapolation",
+            (std::vector<std::vector<double>>(*)(
+                std::vector<std::vector<double>>&,
+                std::shared_ptr<FunctionSpace>&,
+                std::shared_ptr<FunctionSpace>&)
+            ) &zero_extrapolation,
             "Extrapolates local ms functions to W with zeros",
-            py::arg("NodalValues"), py::arg("xi"), py::arg("W"));
+            py::arg("NodalValues"), py::arg("V"), py::arg("W"));
+
+    m.def(
+            "zero_extrapolation",
+            (std::vector<std::vector<double>>(*)(
+                py::array_t<double>&,
+                std::shared_ptr<FunctionSpace>&,
+                std::shared_ptr<FunctionSpace>&)
+            ) &zero_extrapolation,
+            "Extrapolates local ms functions to W with zeros",
+            py::arg("NodalValues"), py::arg("V"), py::arg("W"));
+
+
+//     m.def(
+//             "stiffness_integral_matrix",
+//             (py::array_t<double> (*)(
+//                 std::shared_ptr<Function>&,
+//                 std::vector<std::vector<double>>&,
+//                 std::vector<std::vector<double>>&,
+//                 std::shared_ptr<MeshFunction<size_t>>)
+//             ) &stiffness_integral_matrix,
+//             "Assemble stiffness matrix <kappa grad(Psi_i), grad(Psi_j)>",
+//             py::arg("kappa"), py::arg("Psi_i"),
+//             py::arg("Psi_j"), py::arg("markers"));
 
     m.def(
             "stiffness_integral_matrix",
@@ -222,4 +352,23 @@ PYBIND11_MODULE(SIGNATURE, m) {
             "Assemble stiffness matrix <kappa grad(Psi_i), grad(Psi_j)>",
             py::arg("kappa"), py::arg("Psi_i"),
             py::arg("Psi_j"), py::arg("markers"));
+
+//     m.def(
+//             "stiffness_integral_matrix",
+//             (std::pair<py::array_t<double>, py::array_t<double>> (*)(
+//                 std::shared_ptr<Function>&,
+//                 std::vector<std::vector<double>>&,
+//                 std::shared_ptr<Function>&,
+//                 std::shared_ptr<MeshFunction<size_t>>)
+//             ) &stiffness_integral_matrix,
+//             "Returns A,b of system Ax = b",
+//             py::arg("kappa"), py::arg("Psi"),
+//             py::arg("RHS"), py::arg("markers"));
+
+    m.def(
+            "integral_assembling",
+            &integral_assembling,
+            "Returns A,b of system Ax = b",
+            py::arg("kappa"), py::arg("Psi"),
+            py::arg("RHS"), py::arg("markers"));
 }

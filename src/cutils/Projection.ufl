@@ -1,0 +1,12 @@
+# Projection.ufl
+
+element = FiniteElement("Lagrange", triangle, 1)
+
+xi = Coefficient(element)
+f = Coefficient(element)
+
+Pf = TrialFunction(element)
+v = TestFunction(element)
+
+a = Pf*v*dx
+L = xi*f*v*dx
