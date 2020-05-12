@@ -9,11 +9,11 @@ size = comm.Get_size()
 
 ## Init Stage
 # ---------------
-n_el = 8            # num of cells in a coarse block along 1D 
-n_blocks = 4        # num of coarse blocks along 1D
+n_el = 32            # num of cells in a coarse block along 1D
+n_blocks = 4         # num of coarse blocks along 1D
 
-M_off = 10          # dimensionality of offline (online) space
-eta = 1e3           # permeability coefficient's bursts
+M_off = 10           # dimensionality of offline (online) space
+eta = 1e3            # permeability coefficient's bursts
 # ---------------
 
 col = rank % (n_blocks-1)
@@ -36,23 +36,30 @@ with open('cutils/pymodule2.cpp', 'r') as fp:
 core = GMsFEUnit(rank, n_el, n_blocks, cutils)
 
 ##  Offline Stage
+t_off =- MPI.Wtime()
+# -----------------
 Nv = core.snapshotSpace(k)
-print('HERE1')
 Nv,_ = core.modelReduction(k, Nv, M_off)
-print('HERE2')
+# -----------------
+t_off += MPI.Wtime()
 
 ## Online Stage
+t_on =- MPI.Wtime()
+# -----------------
 Nv_i = core.multiscaleFunctions(k, Nv, W)
 
 pairs = overlap_map(n_blocks-1)
 size_mask = (pairs >= size).sum(1).astype(bool)
 pairs = pairs[~size_mask]
 
-imask = (pairs[:, 0] == rank)
-omask = (pairs[:, 1] == rank)
-send_to = pairs[omask][:, 0]
-recv_from = pairs[imask][:, 1]
+def communications(rank):
+    imask = (pairs[:, 0] == rank)
+    omask = (pairs[:, 1] == rank)
+    send_to = pairs[omask][:, 0]
+    recv_from = pairs[imask][:, 1]
+    return send_to, recv_from
 
+send_to, recv_from = communications(rank)
 recvbuf = np.empty((len(recv_from), *Nv_i.shape))
 for dest in send_to:
     comm.Isend([Nv_i, MPI.DOUBLE], dest)
@@ -61,9 +68,13 @@ for i, src in enumerate(recv_from):
 
 ## Global Coupling
 A_ii, b_i = core.diagonalBlock(k, Nv, rhs)
-for i, Nv_j in enumerate(recvbuf):
-    pos = recv_from[i] - i
+
+nodebuf = []
+for Nv_j in recvbuf:
+    pos = recv_from[i] - rank
     A_ij = core.offdiagonalBlock(K, Nv_i, Nv_j, pos)
+    nodebuf.append(A_ij)
+nodebuf = np.array(nodebuf)
 
 all_offdiagA, all_diagA, all_b = None, None, None
 if rank == 0:
@@ -71,11 +82,20 @@ if rank == 0:
     all_diagA = np.empty([(n_blocks-1)**2, *A_ij.shape])
     all_b = np.empty([(n_blocks-1)**2, len(b_i)])
 
-comm.Gather(A_ij, all_offdiagA, root=0)
+    all_diagA = all_diagA[:size]
+    all_b = all_b[:size]
+
+sendcounts = np.full(size, M_off*M_off)
+for r in range(size):
+    sendcounts[r] *= len(communications(r)[1])
+
+comm.Gatherv(nodebuf, (all_offdiagA, sendcounts), root=0)
 comm.Gather(A_ii, all_diagA, root=0)
 comm.Gather(b_i, all_b, root=0)
+# -----------------
+t_on += MPI.Wtime()
 
-## Assembling on the root
+### Assembling on the root
 if rank == 0:
     height = M_off*(n_blocks-1)**2
     A = np.zeros([height, height])
@@ -89,9 +109,12 @@ if rank == 0:
         for j in pairs[i]:
             A[i*M_off:(i+1)*M_off, j*M_off:(j+1)*M_off] = A_i[j]
 
-    A[ij_lower] = np.tril_indices_from(A, -1)
+    ij_lower = np.tril_indices_from(A, -1)
     A[ij_lower] = A.T[ij_lower]
 
-    u = scipy.linalg.solve(A, b, assume_a='pos')
+    print(f'OFFLINE STAGE: {t_off:.3}s')
+    print(f'ONLINE STAGE: {t_on:.3}s')
 
-MPI.Finalize()
+    # 'A' and 'b' assembling is not finished
+    # Thus, the matrix is not p.d.
+    #u = scipy.linalg.solve(A, b, assume_a='pos')

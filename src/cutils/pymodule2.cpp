@@ -12,26 +12,34 @@
 using namespace dolfin;
 namespace py = pybind11;
 
-using matvec_pair = std::pair<
-    std::shared_ptr<Matrix>,
-    std::shared_ptr<Vector>>;
-using matmat_pair = std::pair<
-    std::shared_ptr<Matrix>,
-    std::shared_ptr<Matrix>>;
+//using matvec_pair = std::pair<
+//    std::shared_ptr<Matrix>,
+//    std::shared_ptr<Vector>>;
+//using matmat_pair = std::pair<
+//    std::shared_ptr<Matrix>,
+//    std::shared_ptr<Matrix>>;
+//
+using matmat_pair = std::pair<Matrix, Matrix>;
+using matvec_pair = std::pair<Matrix, Vector>;
 
 
 matmat_pair
 unloaded_matrices(std::shared_ptr<Function>& k) {
     auto V = k->function_space();
+    auto comm = V->mesh()->mpi_comm();
     EPDE::BilinearForm a(V, V);
     GEP::BilinearForm q(V, V);
     a.set_coefficient("k", k);
     q.set_coefficient("k", k);
 
-    std::shared_ptr<Matrix> M(new Matrix);
-    std::shared_ptr<Matrix> S(new Matrix);
-    assemble(*M, q);
-    assemble(*S, a);
+    //std::shared_ptr<Matrix> M(new Matrix);
+    //std::shared_ptr<Matrix> S(new Matrix);
+    //assemble(*M, q);
+    //assemble(*S, a);
+
+    Matrix M(comm), S(comm);
+    assemble(M, q);
+    assemble(S, a);
     return std::make_pair(M, S);
 }
 
@@ -41,16 +49,19 @@ assemble_Ab(
         std::shared_ptr<Function>& k,
         std::shared_ptr<Function>& f) {
     auto V = k->function_space();
+    auto comm = V->mesh()->mpi_comm();
     EPDE::BilinearForm a(V, V);
-    a.k = k;
-
     EPDE::LinearForm L(V);
+    a.k = k;
     L.f = f;
     
-    std::shared_ptr<Matrix> A(new Matrix);
-    std::shared_ptr<Vector> b(new Vector);
-    assemble(*A, a);
-    assemble(*b, L);
+    //std::shared_ptr<Matrix> A(new Matrix);
+    //std::shared_ptr<Vector> b(new Vector);
+    //assemble(*A, a);
+    //assemble(*b, L);
+    Matrix A(comm); Vector b(comm);
+    assemble(A, a);
+    assemble(b, L);
     return std::make_pair(A, b);
 }
 
@@ -58,17 +69,20 @@ assemble_Ab(
 matvec_pair
 assemble_Ab(std::shared_ptr<Function>& k) {
     auto V = k->function_space();
-    EPDE::BilinearForm a(V, V);
-    a.k = k;
-
+    auto comm = V->mesh()->mpi_comm();
     auto f = std::make_shared<Constant>(0.);
+    EPDE::BilinearForm a(V, V);
     EPDE::LinearForm L(V);
+    a.k = k;
     L.f = f;
     
-    std::shared_ptr<Matrix> A(new Matrix);
-    std::shared_ptr<Vector> b(new Vector);
-    assemble(*A, a);
-    assemble(*b, L);
+    //std::shared_ptr<Matrix> A(new Matrix);
+    //std::shared_ptr<Vector> b(new Vector);
+    //assemble(*A, a);
+    //assemble(*b, L);
+    Matrix A(comm); Vector b(comm);
+    assemble(A, a);
+    assemble(b, L);
     return std::make_pair(A, b);
 }
 
@@ -79,6 +93,7 @@ diagonal_coupling(
         std::shared_ptr<Function>& xi,
         std::shared_ptr<Function>& f) {
     auto V = k->function_space();
+    auto comm = V->mesh()->mpi_comm();
     GC::BilinearForm a(V, V);
     a.xi_1 = xi;
     a.xi_2 = xi;
@@ -88,10 +103,14 @@ diagonal_coupling(
     L.xi_1 = xi;
     L.f = f;
     
-    std::shared_ptr<Matrix> A(new Matrix);
-    std::shared_ptr<Vector> b(new Vector);
-    assemble(*A, a);
-    assemble(*b, L);
+    //std::shared_ptr<Matrix> A(new Matrix);
+    //std::shared_ptr<Vector> b(new Vector);
+    //assemble(*A, a);
+    //assemble(*b, L);
+
+    Matrix A(comm); Vector b(comm);
+    assemble(A, a);
+    assemble(b, L);
     return std::make_pair(A, b);
 }
 
@@ -118,6 +137,7 @@ multiply_project(
         std::shared_ptr<Function>& xi,
         py::array_t<double>& Nv) {
     auto V = xi->function_space();
+    auto comm = V->mesh()->mpi_comm();
     Projection::BilinearForm a(V, V);
     Projection::LinearForm L(V);
     L.xi = xi;
@@ -126,7 +146,7 @@ multiply_project(
     double * Nv_ptr = (double *)Nv_info.ptr;
     size_t N_EL(Nv_info.shape[0]), DIM(V->dim());
 
-    Matrix A; Vector b;
+    Matrix A(comm); Vector b(comm);
     assemble(A, a);
 
     auto f = std::make_shared<Function>(V);
