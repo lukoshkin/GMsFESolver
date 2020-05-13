@@ -100,7 +100,7 @@ diagonal_coupling(
     a.k = k;
 
     GC::LinearForm L(V);
-    L.xi_1 = xi;
+    L.xi_2 = xi;
     L.f = f;
     
     //std::shared_ptr<Matrix> A(new Matrix);
@@ -115,19 +115,22 @@ diagonal_coupling(
 }
 
 
-std::shared_ptr<Matrix>
+Matrix
 offdiagonal_coupling(
         std::shared_ptr<Function>& k,
         std::shared_ptr<Function>& xi_1,
         std::shared_ptr<Function>& xi_2) {
     auto V = k->function_space();
+    auto comm = V->mesh()->mpi_comm();
     GC::BilinearForm a(V, V);
     a.xi_1 = xi_1;
     a.xi_2 = xi_2;
     a.k = k;
     
-    std::shared_ptr<Matrix> A(new Matrix);
-    assemble(*A, a);
+    //std::shared_ptr<Matrix> A(new Matrix);
+    //assemble(*A, a);
+    Matrix A(comm);
+    assemble(A, a);
     return A;
 }
 
@@ -211,6 +214,30 @@ zero_extrapolation(
         e->vector()->get_local(ms_dofs[i]);
     }
     return ms_dofs;
+}
+
+
+std::vector<std::shared_ptr<Function>>
+compose(
+        py::array_t<double>& ms_dofs,
+        std::shared_ptr<FunctionSpace>& W) {
+
+    auto ms_info = ms_dofs.request();
+    double * ms_ptr = (double *)ms_info.ptr;
+    size_t N1(ms_info.shape[0]), N2(ms_info.shape[1]), DIM(W->dim());
+
+    std::vector<std::shared_ptr<Function>> basis(N1*N2);
+    for (uint i=0; i<N1; ++i) {
+        for (uint j=0; j<N2; ++j) {
+            auto w = std::make_shared<Function>(W);
+            w->vector()->set_local(
+                    std::vector<double>(
+                        ms_ptr + i*N2*DIM + j*DIM,
+                        ms_ptr + i*N2*DIM + j*DIM + DIM));
+            basis[i*N2+j] = w;
+        }
+    }
+    return basis;
 }
 
 
@@ -353,6 +380,11 @@ PYBIND11_MODULE(SIGNATURE, m) {
             "Extrapolates local ms functions to W with zeros",
             py::arg("NodalValues"), py::arg("V"), py::arg("W"));
 
+    m.def(
+            "compose",
+            &compose,
+            "Restore function basis by their dofs",
+            py::arg("ms_dofs"), py::arg("W"));
 
 //     m.def(
 //             "stiffness_integral_matrix",

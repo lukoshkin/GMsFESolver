@@ -13,5 +13,5 @@ f = Coefficient(element)
 u = TrialFunction(element)
 v = TestFunction(element)
 
-L = f*xi_1*v*dx
+L = f*xi_2*v*dx
 a = k*dot(grad(xi_1*u), grad(xi_2*v))*dx
