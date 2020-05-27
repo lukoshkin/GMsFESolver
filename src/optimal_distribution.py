@@ -11,7 +11,7 @@ def decompose(N, m, b=8):
     b is a number of bits used for an integer
     in the output array
     """
-    terms = np.empty(m, f'int{b}')
+    terms = np.empty(m, f'i{b}')
     terms[:] = math.floor(N/m)
     terms[:N-terms.sum()] += 1
     return terms 
@@ -53,10 +53,10 @@ class ColoredPartition:
         except KeyError:
             warn('Call the `partition` method first!')
             return zip()
-        cs = cs[cs != None]
-        rs = rs[rs != None]
+        cs = cs[cs >= -1]
+        rs = rs[rs >= -1]
         if comm_flags:
-            f = np.full_like(cs, False)
+            f = np.full_like(cs, False, dtype=bool)
             f[self.cid:] = True
             return zip(cs, rs, f)
         return zip(cs, rs)
@@ -78,7 +78,8 @@ class ColoredPartition:
         that one can gather calculated results on the major cores
         later with a minimum number of communications*.
 
-        Returns: number of required communicators
+        Returns: number of required communicators and communications
+                 or None if there are no communications
 
         (*under the condition of minimum execution time)
         ------------------------------------------------
@@ -112,11 +113,11 @@ class ColoredPartition:
             fill_size = min(self._size, n_tasks)
             if i == 0: self.n_comms = fill_size // self.dimC
 
-            C = np.full(self.size, None)
+            C = np.full(self.size, -1)
             V = np.arange(fill_size) % self.dimC
             C[:len(V)] = V
 
-            R = np.full(self.size, None)
+            R = np.full(self.size, -1)
             V = np.arange(fill_size) // self.dimC
             V += progress + i*self._ncom
             R[:len(V)] = V
@@ -134,11 +135,11 @@ class ColoredPartition:
         """
         fill_size = min(self.size, n_tasks//self.dimC)
 
-        C = np.full((self.size, self.dimC), None)
+        C = np.full((self.size, self.dimC), -1)
         V = np.tile(np.arange(self.dimC), (fill_size, 1))
         C[:fill_size] = V
 
-        R = np.full((self.size, self.dimC), None)
+        R = np.full((self.size, self.dimC), -1)
         V = np.tile(np.arange(fill_size)[:,None], (1, self.dimC))
         V += progress
         R[:fill_size] = V
@@ -147,9 +148,8 @@ class ColoredPartition:
         self.map['r'] = np.hstack((self.map['r'], R))
 
     def _initRankMap(self):
-        self.map['c'] = np.array([],'O').reshape(self.size, 0)  
-        self.map['r'] = np.array([],'O').reshape(self.size, 0)  
-
+        self.map['c'] = np.array([], 'i8').reshape(self.size, 0)
+        self.map['r'] = np.array([], 'i8').reshape(self.size, 0)
 
 
 class Redistribution:
