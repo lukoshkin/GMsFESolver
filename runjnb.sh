@@ -82,7 +82,7 @@ port="127.0.0.1:$port"
 
 dir=/home/fenics
 cache=$dir/.num_of_users.tmp  # to track num of sessions
-[ "$exists" ] && echo "Resuming container '$name'" \
+[ "$exists" ] && echo "Entering container '$name'" \
   || (echo "Creating container '$name'"
     docker run --name $name \
     -w $dir -v $PWD:$dir/shared \
@@ -107,12 +107,6 @@ user_census () {
   && docker exec --user='fenics' -d $name jupyter notebook --ip=0.0.0.0 \
   || count_users && ((num_of_users+=1)) && user_census
 
-other_users() {
-  count_users
-  [ $num_of_users -gt 1 ] && in_use=true || in_use=false
-  ((num_of_users-=1)) && user_census
-}
-
 run_notebook () {
   token=$(docker exec --user="fenics" $name jupyter notebook list |
     tail -1 | \grep -o "token=[a-z0-9]*")
@@ -126,7 +120,9 @@ run_bash () {
 
 function ctrl_c() {
   echo
-  other_users
+  count_users
+  [ $num_of_users -gt 1 ] && in_use=true || in_use=false
+  ((num_of_users-=1)) && user_census
   $(docker inspect -f {{.State.Running}} $name 2> /dev/null) \
     && ! $in_use \
     && echo "Stopping container '$name'" \
