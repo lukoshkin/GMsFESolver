@@ -135,13 +135,18 @@ class GMsFEUnit:
             Nv[i] = u.get_local()
         return Nv
 
-    def modelReduction(self, k, Nv, n_eig=10):
+    def modelReduction(self, k, Nv, n_eig=10, eps=1e-12, km=None):
         """
         n_eig - number of dominant eigenvalues to be kept
         """
-        M, S = self._cutils.unloaded_matrices(k.cpp_object())
-        M = Nv @ M.array() @ Nv.T
-        S = Nv @ S.array() @ Nv.T
+        if km is not None:
+            M, S = self._cutils.unloaded_matrices(
+                    k.cpp_object(), km.cpp_object())
+        else:
+            M, S = self._cutils.unloaded_matrices(k.cpp_object())
+
+        M = Nv @ M.array() @ Nv.T + eps*np.identity(len(Nv))
+        S = Nv @ S.array() @ Nv.T + eps*np.identity(len(Nv))
 
         which = (len(Nv)-n_eig, len(Nv)-1) if n_eig else None
         w, h = scipy.linalg.eigh(M, S, eigvals=which)

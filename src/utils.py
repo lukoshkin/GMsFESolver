@@ -4,12 +4,13 @@ from dolfin import *
 
 
 def get_simple_kappa(
-        eta, N_el, gap=2, rho=10,
-        comm=MPI.comm_world, seed=None):
+        eta, N_el, gap=2, rho=10, comm=MPI.comm_world,
+        seed=None, non_overlapping=False):
     """
     eta     list of floats (eta[i] - value of the i-th permeability func.)
     N_el    number of elements in the mesh along one dim.
     gap     indent from the edges where no strip is drawn
+    rho     maximum number of strips, the minumum is `rho//3`
     """
     mesh = UnitSquareMesh(comm, N_el, N_el)
     V = FunctionSpace(mesh, 'P', 1)
@@ -18,22 +19,26 @@ def get_simple_kappa(
         np.random.seed(seed)
 
     K = []
-    mask = np.zeros((N_el+1, N_el+1))
-
     flag = False
     try:
         iter(eta)
     except TypeError:
         eta = [eta]
         flag = True
+        non_overlapping = True
+
+    if non_overlapping: mask = np.zeros((N_el+1, N_el+1))
+    else: mask = np.zeros((len(eta), N_el+1, N_el+1))
 
     for i in range(len(eta)):
         n_strips = np.random.randint(rho//3, rho)
         mask_i = generate_mask(n_strips, N_el, gap, i+1)
-        mask[mask_i>0] = mask_i[mask_i>0]
+        if non_overlapping: mask[mask_i>0] = mask_i[mask_i>0]
+        else: mask[i] = mask_i
 
     for i in range(len(eta)):
-        K.append(set_kappa(eta[i], mask, V, i+1))
+        if non_overlapping: K.append(set_kappa(eta[i], mask, V, i+1))
+        else: K.append(set_kappa(eta[i], mask[i], V, i+1))
 
     if flag: return K[0]
     return K
@@ -62,11 +67,11 @@ def generate_mask(n_strips, N_el, gap, tag=1, seed=None):
     """
     if seed is not None:
         np.random.seed(seed)
-    side = N_el + 1 - 2 * gap 
+    side = N_el + 1 - 2*gap
     n_ver = np.random.binomial(n_strips, p=.5)
     ends = [None] * 2
     mask = np.zeros((N_el+1, N_el+1))
-    for pos, n_lines in zip((0, 1), (n_ver, n_strips - n_ver)):
+    for pos, n_lines in zip((0, 1), (n_ver, n_strips-n_ver)):
         ends[0] = np.random.choice(side, n_lines, replace=False) + gap 
         ends[1] = np.random.choice(side, n_lines, replace=False) + gap 
         lengths = np.ceil(

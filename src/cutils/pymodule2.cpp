@@ -32,10 +32,22 @@ unloaded_matrices(std::shared_ptr<Function>& k) {
     a.set_coefficient("k", k);
     q.set_coefficient("k", k);
 
-    //std::shared_ptr<Matrix> M(new Matrix);
-    //std::shared_ptr<Matrix> S(new Matrix);
-    //assemble(*M, q);
-    //assemble(*S, a);
+    Matrix M(comm), S(comm);
+    assemble(M, q);
+    assemble(S, a);
+    return std::make_pair(M, S);
+}
+
+matmat_pair
+unloaded_matrices(
+        std::shared_ptr<Function>& km,
+        std::shared_ptr<Function>& ks) {
+    auto V = ks->function_space();
+    auto comm = V->mesh()->mpi_comm();
+    EPDE::BilinearForm a(V, V);
+    GEP::BilinearForm q(V, V);
+    a.set_coefficient("k", ks);
+    q.set_coefficient("k", km);
 
     Matrix M(comm), S(comm);
     assemble(M, q);
@@ -319,11 +331,23 @@ integral_assembling(
 
 PYBIND11_MODULE(SIGNATURE, m) {
     m.doc() = "Faster calculations with C++";
+
     m.def(
-            "unloaded_matrices", 
-            &unloaded_matrices,
+            "unloaded_matrices",
+            (matmat_pair (*)(
+              std::shared_ptr<Function>&)
+            ) &unloaded_matrices,
             "Assemble mass and stiffness matrices",
             py::arg("kappa"));
+
+    m.def(
+            "unloaded_matrices",
+            (matmat_pair (*)(
+              std::shared_ptr<Function>&,
+              std::shared_ptr<Function>&)
+            ) &unloaded_matrices,
+            "Assemble mass and stiffness matrices",
+            py::arg("kappa_m"), py::arg("kappa_s"));
 
     m.def(
             "assemble_Ab", 
@@ -386,36 +410,12 @@ PYBIND11_MODULE(SIGNATURE, m) {
             "Restore function basis by their dofs",
             py::arg("ms_dofs"), py::arg("W"));
 
-//     m.def(
-//             "stiffness_integral_matrix",
-//             (py::array_t<double> (*)(
-//                 std::shared_ptr<Function>&,
-//                 std::vector<std::vector<double>>&,
-//                 std::vector<std::vector<double>>&,
-//                 std::shared_ptr<MeshFunction<size_t>>)
-//             ) &stiffness_integral_matrix,
-//             "Assemble stiffness matrix <kappa grad(Psi_i), grad(Psi_j)>",
-//             py::arg("kappa"), py::arg("Psi_i"),
-//             py::arg("Psi_j"), py::arg("markers"));
-
     m.def(
             "stiffness_integral_matrix",
             &stiffness_integral_matrix,
             "Assemble stiffness matrix <kappa grad(Psi_i), grad(Psi_j)>",
             py::arg("kappa"), py::arg("Psi_i"),
             py::arg("Psi_j"), py::arg("markers"));
-
-//     m.def(
-//             "stiffness_integral_matrix",
-//             (std::pair<py::array_t<double>, py::array_t<double>> (*)(
-//                 std::shared_ptr<Function>&,
-//                 std::vector<std::vector<double>>&,
-//                 std::shared_ptr<Function>&,
-//                 std::shared_ptr<MeshFunction<size_t>>)
-//             ) &stiffness_integral_matrix,
-//             "Returns A,b of system Ax = b",
-//             py::arg("kappa"), py::arg("Psi"),
-//             py::arg("RHS"), py::arg("markers"));
 
     m.def(
             "integral_assembling",
