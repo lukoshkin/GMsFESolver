@@ -5,12 +5,12 @@
 ##################################
 
 print_warning () {
-  echo -e "\nWARNING"
-  printf "\n%2s You are trying to run chrome as root. On the day this\n" ''
-  printf "%2s script was written, it was only possible to do by adding\n" ''
-  printf "%2s '--no-sandbox' option to chrome's call in this script.\n" ''
-  printf "%2s For your safety, it is highly discouraged to run chrome\n" ''
-  printf "%2s without sandboxing, unless you know what you are doing\n" ''
+  echo -e "\nWARNING:"
+  printf "\n%2s There is no need to run this script as root. \n" ''
+  printf "%2s Jupyter Notebook is a web application. Running \n" ''
+  printf "%2s browser with privileges may result in security \n" ''
+  printf "%2s problems. However, you can change the behavior \n" ''
+  printf "%2s by removing the EUID check.\n" ''
   exit
 }
 
@@ -81,24 +81,43 @@ port="127.0.0.1:$port"
 # ---------------------------------------------------------------------
 
 dir=/home/fenics
+cache=$dir/.num_of_users.tmp  # to track num of sessions
 [ "$exists" ] && echo "Resuming container '$name'" \
-  && docker start $name > /dev/null \
   || (echo "Creating container '$name'"
     docker run --name $name \
     -w $dir -v $PWD:$dir/shared \
     -d -p $port:8888 \
-    $image 'tail -f /dev/null' > /dev/null)
+    $image 'tail -f /dev/null' > /dev/null \
+    && docker exec --user='fenics' $name bash -c "echo 0 > $cache")
 
 # NOTE: Due to the workaround I use, `-w` option has no effect on
 # login options of the user 'fenics'
 # ---------------------------------------------------------------------
-docker exec --user="fenics" -d $name jupyter notebook --ip=0.0.0.0
+
+count_users () {
+  num_of_users=$(docker exec --user='fenics' $name bash -c "head -n1 $cache")
+}
+user_census () {
+  docker exec --user='fenics' $name bash -c "echo $num_of_users > $cache"
+}
+
+! $(docker inspect -f {{.State.Running}} $name 2> /dev/null) \
+  && docker start $name > /dev/null \
+  && docker exec --user='fenics' $name bash -c "echo 0 > $cache" \
+  && docker exec --user='fenics' -d $name jupyter notebook --ip=0.0.0.0 \
+  || count_users && ((num_of_users+=1)) && user_census
+
+other_users() {
+  count_users
+  [ $num_of_users -gt 1 ] && in_use=true || in_use=false
+  ((num_of_users-=1)) && user_census
+}
 
 run_notebook () {
   token=$(docker exec --user="fenics" $name jupyter notebook list |
     tail -1 | \grep -o "token=[a-z0-9]*")
   port=$(docker port $name | cut -d ' ' -f3)
-  \google-chrome http://$port/?$token
+  \xdg-open http://$port/?$token &> err.runjnb.log
 }
 
 run_bash () {
@@ -107,9 +126,12 @@ run_bash () {
 
 function ctrl_c() {
   echo
+  other_users
   $(docker inspect -f {{.State.Running}} $name 2> /dev/null) \
+    && ! $in_use \
     && echo "Stopping container '$name'" \
-    && docker stop $name > /dev/null
+    && docker stop $name > /dev/null \
+    || echo "There are active sessions."
   exit
 }
 
