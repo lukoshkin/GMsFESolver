@@ -14,8 +14,8 @@ from dolfin import *
 
 def zero_extrapolate(Nv, V, W, j, i):
     """
-    Many times faster (40-300x) than
-    equivalent operation with LagrangeInterpolator
+    A faster version of the equivalent
+    operation with `LagrangeInterpolator`
     """
     N = W.dim()
     n = int(math.sqrt(N))
@@ -62,30 +62,26 @@ def overlap_map(n):
     return pairs
 
 
-def _setBC(x, src, tol):
-    """
-    BC in a point 'src' with the tolerance 'tol'
-    """
-    predicate_1 = near(x[0], src[0], tol)
-    predicate_2 = near(x[1], src[1], tol)
-    return predicate_1 and predicate_2
-
-
 class GMsFEUnit:
     """
     n_el        number of elements in a coarse block along one dimension
     n_blocks    number of coarse blocks along one dimension
     """
     def __init__(self, reg_id, n_el, n_blocks, cutils):
-        tol = 1./(n_el*n_blocks)
-        subd = lambda x_l, x_r, y_l, y_r: (
-            CompiledSubDomain(
+        subd = lambda x_l, x_r, y_l, y_r: CompiledSubDomain(
                 '((x[0] >= x_l-tol) && (x[0] <= x_r+tol))'
                 '&& ((x[1] >= y_l-tol) && (x[1] <= y_r+tol))',
-                x_l=x_l, x_r=x_r, y_l=y_l, y_r=y_r, tol=1e-8));
-        rel_id = np.array([0, 1, n_blocks-2, n_blocks-1, n_blocks])
-
+                x_l=x_l, x_r=x_r, y_l=y_l, y_r=y_r, tol=1e-8)
         tau = 1./n_blocks
+        self._tol = tau/n_el
+        self._bc = lambda x0, x1: CompiledSubDomain(
+                'near(x[0], x0, tol) && near(x[1], x1, tol)',
+                x0=x0, x1=x1, tol=tau/n_el)
+        self._pv = lambda x_m: CompiledSubDomain(
+                'near(x[0], x_m, tol)', x_m=x_m, tol=1e-8)
+        self._ph = lambda y_m: CompiledSubDomain(
+                'near(x[1], y_m, tol)', y_m=y_m, tol=1e-8)
+
         col = reg_id % (n_blocks-1)
         row = reg_id // (n_blocks-1)
         x_m, y_m = (col+1)*tau, (row+1)*tau
@@ -94,6 +90,7 @@ class GMsFEUnit:
         self._midp = x_m, y_m
 
         self._subd = {}
+        rel_id = np.array([0, 1, n_blocks-2, n_blocks-1, n_blocks])
         self._subd[rel_id[0]] = subd(x_l, x_r, y_l, y_r)
         self._subd[rel_id[1]] = subd(x_m, x_r, y_l, y_r)
         self._subd[rel_id[2]] = subd(x_l, x_m, y_m, y_r)
@@ -108,7 +105,7 @@ class GMsFEUnit:
 
         self._nblocks = n_blocks
         self._cutils = cutils
-        self._tol = tau/n_el
+
 
     def snapshotSpace(self, k):
         """
@@ -119,25 +116,26 @@ class GMsFEUnit:
         V = k.function_space()
         bmesh = BoundaryMesh(V.mesh(), 'local')
         Nv = np.empty((bmesh.num_cells(), V.dim()))
+        bc0 = DirichletBC(V, Constant(0.), 'on_boundary')
 
+        solver = KrylovSolver('bicgstab', 'ilu')
         for i, src in enumerate(bmesh.coordinates()):
-            single = lambda x: _setBC(x, src, self._tol)
-            bc1 = DirichletBC(V, Constant(0.), lambda x,on: on)
-            bc2 = DirichletBC(V, Constant(1.), single, 'pointwise')
+            bc1 = DirichletBC(
+                V, Constant(1.), self._bc(*src), 'pointwise')
 
             _A = A.copy()
             _b = b.copy()
+            bc0.apply(_A, _b)
             bc1.apply(_A, _b)
-            bc2.apply(_A, _b)
 
             u = b.copy()
-            solve(_A, u, _b)
+            solver.solve(_A, u, _b)
             Nv[i] = u.get_local()
         return Nv
 
     def modelReduction(self, k, Nv, n_eig=10, eps=1e-12, km=None):
         """
-        n_eig - number of dominant eigenvalues to be kept
+        n_eig - number of dominant eigenvalues to preserve
         """
         if km is not None:
             M, S = self._cutils.unloaded_matrices(
@@ -145,8 +143,9 @@ class GMsFEUnit:
         else:
             M, S = self._cutils.unloaded_matrices(k.cpp_object())
 
-        M = Nv @ M.array() @ Nv.T + eps*np.identity(len(Nv))
-        S = Nv @ S.array() @ Nv.T + eps*np.identity(len(Nv))
+        diag = eps*np.identity(len(Nv))
+        M = Nv @ M.array() @ Nv.T + diag
+        S = Nv @ S.array() @ Nv.T + diag
 
         which = (len(Nv)-n_eig, len(Nv)-1) if n_eig else None
         w, h = scipy.linalg.eigh(M, S, eigvals=which)
@@ -175,9 +174,9 @@ class GMsFEUnit:
                 k=self._nblocks, x_m=x_m, degree=1)
 
         V = k.function_space()
-        bc0 = DirichletBC(V, Constant(0.), lambda x,on: on)
-        bc1 = DirichletBC(V, u_mv, lambda x: near(x[0], x_m, eps=1e-8))
-        bc2 = DirichletBC(V, u_mh, lambda x: near(x[1], y_m, eps=1e-8))
+        bc0 = DirichletBC(V, Constant(0.), 'on_boundary')
+        bc1 = DirichletBC(V, u_mv, self._pv(x_m))
+        bc2 = DirichletBC(V, u_mh, self._ph(y_m))
 
         A, b = self._cutils.assemble_Ab(k.cpp_object())
         for bc in [bc0, bc1, bc2]: bc.apply(A, b)
