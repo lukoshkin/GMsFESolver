@@ -1,4 +1,4 @@
-FROM quay.io/fenicsproject/stable:2019.1.0.r3
+FROM quay.io/fenicsproject/dev:latest
 
 # uninstall jupyter since it was installed
 # in root install directory in the base image

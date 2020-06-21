@@ -1,79 +1,21 @@
-# Version dependent lines contain:
-#  -  `._cpp_object`
-#  -  `.cpp_object()`
-# This is valid for FEniCS-2019.1.0.
-# There is no information about newer versions
-
-import math
 import numpy as np
 import scipy.linalg
 
-from ufl import *
-from dolfin import *
-
-
-def zero_extrapolate(Nv, V, W, j, i):
-    """
-    A faster version of the equivalent
-    operation with `LagrangeInterpolator`
-    """
-    N = W.dim()
-    n = int(math.sqrt(N))
-    I = np.arange(N).reshape(n, n)
-
-    p = int(math.sqrt(Nv.shape[-1])/2)
-    vertices = I[i*p:(i+2)*p+1, j*p:(j+2)*p+1].flatten()
-
-    v2d_V = vertex_to_dof_map(V)
-    v2d_W = vertex_to_dof_map(W)
-    Nv_W = np.zeros((len(Nv), N))
-
-    Nv_W[:, v2d_W[vertices]] = Nv[:, v2d_V]
-    return Nv_W
-
-
-def overlap_map(n):
-    """
-    n - number of coarse neighborhoods along 1D
-
-    Returns id pairs of overlapping regions
-    """
-
-    N = n*n
-    # neighbors below
-    I = np.arange(N-n)
-    pairs = np.column_stack((I, I+n))
-
-    # neighbors on the right
-    I = np.arange(N).reshape(n, n)[:, :-1].flatten()
-    new_pairs = np.column_stack((I, I+1))
-    pairs = np.row_stack((pairs, new_pairs))
-
-    # neighbors on the right, below
-    I = np.arange(N-n).reshape(n-1, n)[:, :-1].flatten()
-    new_pairs = np.column_stack((I, I+n+1))
-    pairs = np.row_stack((pairs, new_pairs))
-
-    # neighbors on the left, below
-    I = np.arange(N-n).reshape(n-1, n)[:, 1:].flatten()
-    new_pairs = np.column_stack((I, I+n-1))
-    pairs = np.row_stack((pairs, new_pairs))
-
-    return pairs
+from ..forms import *
 
 
 class GMsFEUnit:
     """
-    n_el        number of elements in a coarse block along one dimension
-    n_blocks    number of coarse blocks along one dimension
+    n_el        number of elements in a coarse block along 1D
+    n_blocks    number of coarse blocks along one of dimensions
     """
-    def __init__(self, reg_id, n_el, n_blocks, cutils):
+    def __init__(self, reg_id, n_el, n_blocks):
+        self._nblocks = n_blocks
         subd = lambda x_l, x_r, y_l, y_r: CompiledSubDomain(
                 '((x[0] >= x_l-tol) && (x[0] <= x_r+tol))'
                 '&& ((x[1] >= y_l-tol) && (x[1] <= y_r+tol))',
                 x_l=x_l, x_r=x_r, y_l=y_l, y_r=y_r, tol=1e-8)
         tau = 1./n_blocks
-        self._tol = tau/n_el
         self._bc = lambda x0, x1: CompiledSubDomain(
                 'near(x[0], x0, tol) && near(x[1], x1, tol)',
                 x0=x0, x1=x1, tol=tau/n_el)
@@ -90,34 +32,27 @@ class GMsFEUnit:
         self._midp = x_m, y_m
 
         self._subd = {}
-        rel_id = np.array([0, 1, n_blocks-2, n_blocks-1, n_blocks])
-        self._subd[rel_id[0]] = subd(x_l, x_r, y_l, y_r)
-        self._subd[rel_id[1]] = subd(x_m, x_r, y_l, y_r)
-        self._subd[rel_id[2]] = subd(x_l, x_m, y_m, y_r)
-        self._subd[rel_id[3]] = subd(x_l, x_r, y_m, y_r)
-        self._subd[rel_id[4]] = subd(x_m, x_r, y_m, y_r)
+        rel_id = [1, n_blocks-2, n_blocks-1, n_blocks]
+        self._subd[rel_id[0]] = subd(x_m, x_r, y_l, y_r)
+        self._subd[rel_id[1]] = subd(x_l, x_m, y_m, y_r)
+        self._subd[rel_id[2]] = subd(x_l, x_r, y_m, y_r)
+        self._subd[rel_id[3]] = subd(x_m, x_r, y_m, y_r)
 
         # mirrored overlaps
-        self._subd[-rel_id[1]] = subd(x_l, x_m, y_l, y_r)
-        self._subd[-rel_id[2]] = subd(x_m, x_r, y_l, y_m)
-        self._subd[-rel_id[3]] = subd(x_l, x_r, y_l, y_m)
-        self._subd[-rel_id[4]] = subd(x_l, x_m, y_l, y_m)
-
-        self._nblocks = n_blocks
-        self._cutils = cutils
-
+        self._subd[-rel_id[0]] = subd(x_l, x_m, y_l, y_r)
+        self._subd[-rel_id[1]] = subd(x_m, x_r, y_l, y_m)
+        self._subd[-rel_id[2]] = subd(x_l, x_r, y_l, y_m)
+        self._subd[-rel_id[3]] = subd(x_l, x_m, y_l, y_m)
 
     def snapshotSpace(self, k):
         """
         Returns: Nv - Nodal Values, 2D np.ndarray
         """
-        A, b = self._cutils.assemble_Ab(k.cpp_object())
-
+        A, b = assemble_Ab(k)
         V = k.function_space()
         bmesh = BoundaryMesh(V.mesh(), 'local')
         Nv = np.empty((bmesh.num_cells(), V.dim()))
         bc0 = DirichletBC(V, Constant(0.), 'on_boundary')
-
         solver = KrylovSolver('bicgstab', 'ilu')
         for i, src in enumerate(bmesh.coordinates()):
             bc1 = DirichletBC(
@@ -137,12 +72,7 @@ class GMsFEUnit:
         """
         n_eig - number of dominant eigenvalues to preserve
         """
-        if km is not None:
-            M, S = self._cutils.unloaded_matrices(
-                    k.cpp_object(), km.cpp_object())
-        else:
-            M, S = self._cutils.unloaded_matrices(k.cpp_object())
-
+        M, S = unloaded_matrices(k, km)
         diag = eps*np.identity(len(Nv))
         M = Nv @ M.array() @ Nv.T + diag
         S = Nv @ S.array() @ Nv.T + diag
@@ -151,14 +81,14 @@ class GMsFEUnit:
         w, h = scipy.linalg.eigh(M, S, eigvals=which)
         return (h.T @ Nv), w
 
-    def multiscaleFunctions(self, k, Nv):
+    def multiscaleDOFs(self, k, Nv):
         """
         Multiplies the dofs of online functions
         by those of unity partition
         """
         V = k.function_space()
         xi = self.partitionFunction(k)
-        return Nv * xi.vector().get_local()
+        return Nv * xi.get_local()
 
     def partitionFunction(self, k):
         """
@@ -172,17 +102,17 @@ class GMsFEUnit:
         u_mh = Expression(
                 '1 - k*fabs(x[0]-x_m)',
                 k=self._nblocks, x_m=x_m, degree=1)
-
         V = k.function_space()
         bc0 = DirichletBC(V, Constant(0.), 'on_boundary')
         bc1 = DirichletBC(V, u_mv, self._pv(x_m))
         bc2 = DirichletBC(V, u_mh, self._ph(y_m))
 
-        A, b = self._cutils.assemble_Ab(k.cpp_object())
-        for bc in [bc0, bc1, bc2]: bc.apply(A, b)
+        a, L = form_MSL(k, f=Constant(0.))
+        A, b = assemble_system(a, L, [bc0,bc1,bc2])
+        solver = KrylovSolver('cg', 'ilu')
 
-        xi = Function(V)
-        solve(A, xi.vector(), b)
+        xi = b.copy()
+        solver.solve(A, xi, b)
         return xi
 
     def diagonalBlock(self, k, Nv, RHS):
@@ -190,8 +120,7 @@ class GMsFEUnit:
         Returns diagonal block `A_ii` and vector slice `b_i` in
         the global matrix `A` and load vector `b`, repspectively
         """
-        A, b = self._cutils.assemble_Ab(
-                k.cpp_object(), RHS.cpp_object())
+        A, b = assemble_Ab(k, RHS)
 
         A = Nv @ A.array() @ Nv.T
         b = Nv @ b.get_local()
@@ -216,6 +145,6 @@ class GMsFEUnit:
         d2v = dof_to_vertex_map(subV)
         k.vector()[:] = k_i.vector()[mask_i[d2v]]
 
-        A,_ = self._cutils.assemble_Ab(k.cpp_object())
+        A,_ = assemble_Ab(k)
         A = Nv_i[:, mask_i[d2v]] @ A.array() @ Nv_j.T[mask_j[d2v]]
         return A

@@ -1,8 +1,12 @@
-# `comm` is imported from forms.py
 import numpy as np
 
+from dolfin import *
 from petsc4py import PETSc
-from ..forms import *
+
+from ..subdiv import triplets
+from ..forms import form_MSL, assemble_Ab, unloaded_matrices
+
+comm = MPI.comm_self
 
 
 class GMsFEUnit:
@@ -11,40 +15,21 @@ class GMsFEUnit:
     n_blocks    number of coarse blocks along one dimension
     """
     def __init__(self, reg_id, n_el, n_blocks):
-        self._nblocks = n_blocks
-        subd = lambda x_l, x_r, y_l, y_r: CompiledSubDomain(
-                '((x[0] >= x_l-tol) && (x[0] <= x_r+tol))'
-                '&& ((x[1] >= y_l-tol) && (x[1] <= y_r+tol))',
-                x_l=x_l, x_r=x_r, y_l=y_l, y_r=y_r, tol=1e-8)
         tau = 1./n_blocks
-        self._bc = lambda x0, x1: CompiledSubDomain(
-                'near(x[0], x0, tol) && near(x[1], x1, tol)',
-                x0=x0, x1=x1, tol=tau/n_el)
+        col = reg_id % (n_blocks-1)
+        row = reg_id // (n_blocks-1)
+
+        self._midp = (col+1)*tau, (row+1)*tau
+        self._overlap = triplets(n_el, n_blocks)
+        self._nblocks = n_blocks
+
         self._pv = lambda x_m: CompiledSubDomain(
                 'near(x[0], x_m, tol)', x_m=x_m, tol=1e-12)
         self._ph = lambda y_m: CompiledSubDomain(
                 'near(x[1], y_m, tol)', y_m=y_m, tol=1e-12)
-
-        col = reg_id % (n_blocks-1)
-        row = reg_id // (n_blocks-1)
-        x_m, y_m = (col+1)*tau, (row+1)*tau
-        x_l, x_r = x_m - tau, x_m + tau
-        y_l, y_r = y_m - tau, y_m + tau
-        self._midp = x_m, y_m
-
-        self._subd = {}
-        rel_id = np.array([0, 1, n_blocks-2, n_blocks-1, n_blocks])
-        self._subd[rel_id[0]] = subd(x_l, x_r, y_l, y_r)
-        self._subd[rel_id[1]] = subd(x_m, x_r, y_l, y_r)
-        self._subd[rel_id[2]] = subd(x_l, x_m, y_m, y_r)
-        self._subd[rel_id[3]] = subd(x_l, x_r, y_m, y_r)
-        self._subd[rel_id[4]] = subd(x_m, x_r, y_m, y_r)
-
-        # mirrored overlaps
-        self._subd[-rel_id[1]] = subd(x_l, x_m, y_l, y_r)
-        self._subd[-rel_id[2]] = subd(x_m, x_r, y_l, y_m)
-        self._subd[-rel_id[3]] = subd(x_l, x_r, y_l, y_m)
-        self._subd[-rel_id[4]] = subd(x_l, x_m, y_l, y_m)
+        self._bc = lambda x0, x1: CompiledSubDomain(
+                'near(x[0], x0, tol) && near(x[1], x1, tol)',
+                x0=x0, x1=x1, tol=tau/n_el)
 
     def snapshotSpace(self, k):
         """
@@ -74,7 +59,7 @@ class GMsFEUnit:
         """
         n_eig - number of dominant eigenvalues to be kept
         """
-        # petsc bug:
+        # petsc4py bug:
         # ```
         # P = PETSc.Mat(comm)
         # P.createDense(Nv.shape, array=Nv)
@@ -161,29 +146,15 @@ class GMsFEUnit:
         pos - position of j-th block relative to i-th block
         Returns off-diagonal block `A_ij` in the global matrix `A`
         """
-        # TODO: SubMesh does not work in parallel.
-              # Also, mask extraction every call is redundant,
-              # since there are only 8 possible combinations
-        V = k_i.function_space()
-        subm_i = SubMesh(V.mesh(), self._subd[pos])
-        subm_j = SubMesh(V.mesh(), self._subd[-pos])
-
-        v2d = vertex_to_dof_map(V)
-        mask_i = v2d[subm_i.data().array('parent_vertex_indices', 0)]
-        mask_j = v2d[subm_j.data().array('parent_vertex_indices', 0)]
-
-        subV = FunctionSpace(subm_i, 'P', 1)
-        k = Function(subV)
-
-        d2v = dof_to_vertex_map(subV)
-        k.vector()[:] = k_i.vector()[mask_i[d2v]]
+        k, mask_i, mask_j = self._overlap[pos]
+        k.vector()[:] = k_i.vector()[mask_i]
 
         P1 = PETSc.Mat()
-        Nv = Nv_i[:, mask_i[d2v]]
+        Nv = Nv_i[:, mask_i]
         P1.createDense(Nv.shape, array=Nv, comm=comm)
 
         P2 = PETSc.Mat()
-        Nv = Nv_j[:, mask_j[d2v]]
+        Nv = Nv_j[:, mask_j]
         P2.createDense(Nv.shape, array=Nv, comm=comm)
 
         A,_ = assemble_Ab(k)
