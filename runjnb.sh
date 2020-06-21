@@ -56,6 +56,7 @@ image=$(tr -d "'" <<< $1)
 [ -z $(docker images -q $image) ] \
   && echo "Error: Image does not exist" >&2 && exit 1
 name="$(sed -E 's/([a-zA-Z0-9_.-]+):([a-zA-Z0-9_.-]*)/\1-\2/' <<< $image)"
+name="$(sed 's/\//_/g' <<< $name)"
 
 exists="$(docker ps -af name=$name | \grep $name)"
 $rm_flag && [ "$exists" ] \
@@ -81,14 +82,15 @@ port="127.0.0.1:$port"
 # ---------------------------------------------------------------------
 
 dir=/home/fenics
-cache=$dir/.num_of_users.tmp  # to track num of sessions
+cache=$dir/.num_of_users.tmp  # to track num. of sessions
 [ "$exists" ] && echo "Entering container '$name'" \
   || (echo "Creating container '$name'"
     docker run --name $name \
     -w $dir -v $PWD:$dir/shared \
     -d -p $port:8888 \
-    $image 'tail -f /dev/null' > /dev/null \
-    && docker exec --user='fenics' $name bash -c "echo 0 > $cache")
+    $image 'tail -f /dev/null' > /dev/null
+    docker exec --user='fenics' $name bash -c "echo 0 > $cache"
+    docker exec --user='fenics' -d $name jupyter notebook --ip=0.0.0.0)
 
 # NOTE: Due to the workaround I use, `-w` option has no effect on
 # login options of the user 'fenics'
@@ -97,13 +99,14 @@ cache=$dir/.num_of_users.tmp  # to track num of sessions
 count_users () {
   num_of_users=$(docker exec --user='fenics' $name bash -c "head -n1 $cache")
 }
+
 user_census () {
   docker exec --user='fenics' $name bash -c "echo $num_of_users > $cache"
 }
 
 ! $(docker inspect -f {{.State.Running}} $name 2> /dev/null) \
   && docker start $name > /dev/null \
-  && docker exec --user='fenics' $name bash -c "echo 0 > $cache" \
+  && docker exec --user='fenics' $name bash -c "echo 1 > $cache" \
   && docker exec --user='fenics' -d $name jupyter notebook --ip=0.0.0.0 \
   || count_users && ((num_of_users+=1)) && user_census
 
