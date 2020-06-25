@@ -55,6 +55,27 @@ def overlap_map(n):
     return pairs
 
 
+def _mm1(m, overlap, pos):
+    subm_i = SubMesh(m, overlap[pos])
+    subm_j = SubMesh(m, overlap[-pos])
+
+    mask_i = subm_i.data().array('parent_vertex_indices', 0)
+    mask_j = subm_j.data().array('parent_vertex_indices', 0)
+    return subm_i, mask_i, mask_j
+
+
+def _mm2(m, overlap, pos):
+    markers = MeshFunction('size_t', m, 2, 0)
+    overlap[pos].mark(markers, 1)
+    overlap[-pos].mark(markers, 2)
+
+    subm_i = MeshView.create(markers, 1)
+    subm_j = MeshView.create(markers, 2)
+    mask_i = subm_i.topology().mapping()[m.id()].vertex_map()
+    mask_j = subm_j.topology().mapping()[m.id()].vertex_map()
+    return subm_i, mask_i, mask_j
+
+
 def triplets(n_el, n_blocks):
     subd = lambda x_l, x_r, y_l, y_r: CompiledSubDomain(
             '((x[0] >= x_l-tol) && (x[0] <= x_r+tol))'
@@ -81,25 +102,14 @@ def triplets(n_el, n_blocks):
     m = UnitSquareMesh(comm, 2*n_el, 2*n_el)
     m.scale(2./n_blocks)
 
-    markers = MeshFunction('size_t', m, 2)
     V = FunctionSpace(m, 'P', 1)
     v2d = vertex_to_dof_map(V)
     struct = {}
 
-    #qid = str(time.time()).split('.')[1]
-    #fname = f'm{qid}.xdmf'
-    fname = f'm.xdmf'
-
+    base = 'mesh'
+    ext = 'xdmf'
     for pos in rel_id:
-        markers.set_all(0)
-        overlap[pos].mark(markers, 1)
-        overlap[-pos].mark(markers, 2)
-
-        subm_i = MeshView.create(markers, 1)
-        subm_j = MeshView.create(markers, 2)
-        mask_i = subm_i.topology().mapping()[m.id()].vertex_map()
-        mask_j = subm_j.topology().mapping()[m.id()].vertex_map()
-
+        subm_i, mask_i, mask_j = _mm1(m, overlap, pos)
         subV = FunctionSpace(subm_i, 'P', 1)
         d2v = dof_to_vertex_map(subV)
         mask_i = v2d[mask_i][d2v]
@@ -111,8 +121,10 @@ def triplets(n_el, n_blocks):
         # the one associated with the original mesh.
         # So, the following workaround is used:
 
-        with XDMFFile(comm, fname) as fp:
-            fp.write(subm_i)
+        fname = f'{base}{pos}.{ext}'
+        if not Path(fname).exists():
+            with XDMFFile(comm, fname) as fp:
+                fp.write(subm_i)
         mesh = Mesh(comm)
         with XDMFFile(comm, fname) as fp:
             fp.read(mesh)
