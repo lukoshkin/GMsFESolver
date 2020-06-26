@@ -43,14 +43,10 @@ W = K.function_space()
 rhs = project(RHS, V)
 k = project(K, V)
 
-if rank == 0: core = GMsFEUnit(0, n_el, n_blocks)
-else: core = GMsFEUnit(rank, n_el, n_blocks)
+core = GMsFEUnit(rank, n_el, n_blocks)
 
 wcomm.barrier()
-if rank == 0: 
-    for p in Path('.').iterdir():
-        if re.search('mesh[0-9]+\.(xdmf|h5)', str(p)):
-            p.unlink()
+if rank == 0: clear_cache()
 wcomm.barrier()
 
 ##  Offline Stage
@@ -129,7 +125,7 @@ solver.solve(u, b)
 u = u.gather_on_zero()
 
 if rank == 0:
-    np.save('solution.bin', u)
+    #np.save('solution.bin', u)
     print(f'OFFLINE STAGE: {t_off:.3}s')
     print(f'ONLINE STAGE: {t_on:.3}s')
     print(f'SEND-RECV: {t_sr:.3}s')

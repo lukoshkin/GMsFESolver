@@ -1,4 +1,4 @@
-import time
+import re
 import math
 import numpy as np
 from pathlib import Path
@@ -100,13 +100,13 @@ def triplets(n_el, n_blocks):
     overlap[-rel_id[3]] = subd(x_l, x_m, y_l, y_m)
 
     m = UnitSquareMesh(comm, 2*n_el, 2*n_el)
-    m.scale(2./n_blocks)
+    m.scale(2*tau)
 
     V = FunctionSpace(m, 'P', 1)
     v2d = vertex_to_dof_map(V)
     struct = {}
 
-    base = 'mesh'
+    base = '.tmp/mesh'
     ext = 'xdmf'
     for pos in rel_id:
         subm_i, mask_i, mask_j = _mm1(m, overlap, pos)
@@ -121,7 +121,8 @@ def triplets(n_el, n_blocks):
         # the one associated with the original mesh.
         # So, the following workaround is used:
 
-        fname = f'{base}{pos}.{ext}'
+        id = f'{n_blocks}-{n_el}-{pos}'
+        fname = f'{base}{id}.{ext}'
         if not Path(fname).exists():
             with XDMFFile(comm, fname) as fp:
                 fp.write(subm_i)
@@ -129,11 +130,14 @@ def triplets(n_el, n_blocks):
         with XDMFFile(comm, fname) as fp:
             fp.read(mesh)
 
-        # Though it does not raise an error,
-        # it unreliable way and is only used
-        # to perform time measurements
-
         subV = FunctionSpace(mesh, 'P', 1)
         k = Function(subV)
         struct[pos] = k, mask_i, mask_j
     return struct 
+
+def clear_cache():
+    folder = Path('.tmp')
+    for fp in folder.iterdir():
+        if re.search('mesh[0-9\-]+\.(xdmf|h5)', str(fp)):
+            fp.unlink()
+    folder.rmdir()
