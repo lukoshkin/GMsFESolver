@@ -1,0 +1,13 @@
+# FEniCS stable version image
+
+Welcome to FEniCS/stable!
+
+This image provides a full-featured and optimized build of the stable
+release of FEniCS.
+
+To help you get started this image contains a number of demo
+programs. Explore the demos by entering the 'demo' directory, for
+example:
+
+    cd ~/demo/python/documented/poisson
+    python3 demo_poisson.py

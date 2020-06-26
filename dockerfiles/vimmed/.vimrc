@@ -63,9 +63,9 @@ set path+=**
 set wildmenu
 
 inoremap jj <esc>
-nnoremap m o<esc>
-nnoremap <S-m> <S-o><esc>
 let mapleader=","
+nnoremap <leader>m o<esc>
+nnoremap <leader><S-m> <S-o><esc>
 
 " Run the currently edited file with python
 xnoremap <leader>p :w !python<CR>

@@ -1,0 +1,14 @@
+# FEniCS development environment image
+
+Welcome to FEniCS/dev-env!
+
+This image provides a full-featured and optimized build of all FEniCS
+dependencies, but not FEniCS itself.
+
+It is intended for developers or advanced users who want to build
+their own version of FEniCS.
+
+This image also provides a script which can be used to automatically
+build FEniCS: fenics-update
+
+
