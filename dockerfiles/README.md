@@ -1,4 +1,7 @@
 # Changes Made to FEniCS-2019's Dockerfiles
 
-* Replace MPICH with OpenMPI
-* Add PETSc's `superlu_dist` direct solver
+* **dev-env**
+    * Replace MPICH with OpenMPI
+    * Add PETSc's `superlu_dist` direct solver
+
+Add a vim-powered defenition file (in folder `vimmed`) for personal use

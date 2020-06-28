@@ -124,8 +124,10 @@ u = PETScVector(wcomm, height)
 solver.solve(u, b)
 u = u.gather_on_zero()
 
+# TODO: compile ms_dofs matrix and get the product of the latter and the dofs
+
 if rank == 0:
-    #np.save('solution.bin', u)
+    np.save('solution.bin', u)
     print(f'OFFLINE STAGE: {t_off:.3}s')
     print(f'ONLINE STAGE: {t_on:.3}s')
     print(f'SEND-RECV: {t_sr:.3}s')
